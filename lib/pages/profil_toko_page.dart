@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'kelola_karyawan_page.dart';
+import 'kelola_pelanggan_page.dart';
 
+// Halaman Pengaturan Profil Toko & Footer Struk Kasir
 class ProfilTokoPage extends StatefulWidget {
   const ProfilTokoPage({super.key});
 
@@ -34,7 +36,6 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
     super.dispose();
   }
 
-  // Baca pengaturan dari SharedPreferences (pakai nilai default jika kosong)
   Future<void> _muatProfilToko() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
@@ -51,7 +52,6 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
     });
   }
 
-  // Simpan pengaturan ke SharedPreferences
   Future<void> _simpanProfilToko() async {
     setState(() => _sedangMenyimpan = true);
 
@@ -90,13 +90,20 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Kartu ringkasan kasir aktif
+            // Kartu kasir aktif
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Row(
                 children: [
@@ -140,13 +147,56 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
                           builder: (context) => const KelolaKaryawanPage(),
                         ),
                       );
-                      // Segarkan nama kasir aktif setelah kembali
                       _muatProfilToko();
                     },
                     icon: const Icon(Icons.people_outline, size: 16),
                     label: const Text('Kelola'),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Menu Data Pelanggan (M13)
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ListTile(
+                leading: const CircleAvatar(
+                  radius: 20,
+                  backgroundColor: Color(0xFF0D9488),
+                  child: Icon(Icons.people_alt, color: Colors.white, size: 20),
+                ),
+                title: const Text(
+                  'Data Pelanggan & Lokasi GPS',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                subtitle: const Text(
+                  'Kelola member CRM dan navigasi rute pengantaran',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                trailing: const Icon(
+                  Icons.chevron_right,
+                  color: Color(0xFF1E3A8A),
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const KelolaPelangganPage(),
+                    ),
+                  );
+                },
               ),
             ),
             const SizedBox(height: 20),
@@ -161,7 +211,6 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
             ),
             const SizedBox(height: 12),
 
-            // 1. Nama toko
             TextFormField(
               controller: _namaTokoController,
               decoration: InputDecoration(
@@ -176,7 +225,6 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
             ),
             const SizedBox(height: 14),
 
-            // 2. Alamat
             TextFormField(
               controller: _alamatController,
               maxLines: 2,
@@ -192,7 +240,6 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
             ),
             const SizedBox(height: 14),
 
-            // 3. WhatsApp
             TextFormField(
               controller: _noWaController,
               keyboardType: TextInputType.phone,
@@ -208,7 +255,6 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
             ),
             const SizedBox(height: 14),
 
-            // 4. Footer struk
             TextFormField(
               controller: _footerController,
               maxLines: 2,
@@ -225,7 +271,6 @@ class _ProfilTokoPageState extends State<ProfilTokoPage> {
             ),
             const SizedBox(height: 24),
 
-            // Tombol simpan
             ElevatedButton.icon(
               onPressed: _sedangMenyimpan ? null : _simpanProfilToko,
               style: ElevatedButton.styleFrom(

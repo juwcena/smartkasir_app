@@ -1,50 +1,81 @@
 import 'package:flutter/foundation.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 
 import '../models/produk.dart';
 import '../models/karyawan.dart';
+import '../models/pelanggan.dart';
 
+// Pengelola basis data lokal SQLite (Singleton)
 class DatabaseHelper {
-  // Singleton: satu instance untuk seluruh aplikasi
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+
   DatabaseHelper._init();
 
-  // Ambil database yang sudah ada, atau buat baru jika belum
   Future<Database> get database async {
-    if (_database != null) return _database!;
+    if (_database != null) {
+      await _seedProdukAwal(_database!);
+      return _database!;
+    }
     _database = await _initDB('smartkasir.db');
+    await _seedProdukAwal(_database!);
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
-    // Chrome (Flutter Web) pakai factory khusus web
     if (kIsWeb) {
       databaseFactory = databaseFactoryFfiWeb;
-      return await openDatabase(
+      return await databaseFactory.openDatabase(
         filePath,
-        version: 2,
+        options: OpenDatabaseOptions(
+          version: 3,
+          onCreate: _createDB,
+          onUpgrade: _onUpgradeDB,
+        ),
+      );
+    } else {
+      final dbPath = await getDatabasesPath();
+      final path = join(dbPath, filePath);
+      return await openDatabase(
+        path,
+        version: 3,
         onCreate: _createDB,
         onUpgrade: _onUpgradeDB,
       );
     }
+  }
 
-    // Android: simpan di folder database internal
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, filePath);
-    return await openDatabase(
-      path,
-      version: 2,
-      onCreate: _createDB,
-      onUpgrade: _onUpgradeDB,
+  Future<void> _seedProdukAwal(Database db) async {
+    try {
+      final count =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM produk'),
+          ) ??
+          0;
+      if (count == 0) {
+        for (final produk in produkAwalSQLite) {
+          await db.insert('produk', produk.toMap());
+        }
+      }
+    } catch (_) {
+      // Abaikan jika tabel produk belum terbentuk
+    }
+  }
+
+  Future<void> _seedPelangganAwal(Database db) async {
+    await db.rawInsert(
+      "INSERT INTO pelanggan (kode_pelanggan, nama_pelanggan, nomor_wa, alamat, latitude, longitude, created_at) "
+      "VALUES ('CUST-001', 'Warung Bu Siti', '081234567890', 'Jl. Hasan Basri No. 12, Banjarmasin', -3.298280, 114.588820, '2026-11-01 09:00:00')",
+    );
+    await db.rawInsert(
+      "INSERT INTO pelanggan (kode_pelanggan, nama_pelanggan, nomor_wa, alamat, latitude, longitude, created_at) "
+      "VALUES ('CUST-002', 'Budi Santoso', '085712345678', 'Jl. Kayu Tangi II No. 45, Banjarmasin', -3.295410, 114.582150, '2026-11-02 10:30:00')",
     );
   }
 
-  // Buat tabel dan isi data awal (untuk instalasi baru)
   Future _createDB(Database db, int version) async {
-    // 1. Tabel produk (M11)
     await db.execute('''
       CREATE TABLE produk (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,11 +91,6 @@ class DatabaseHelper {
       )
     ''');
 
-    for (final produk in produkAwalSQLite) {
-      await db.insert('produk', produk.toMap());
-    }
-
-    // 2. Tabel karyawan (M12)
     await db.execute('''
       CREATE TABLE karyawan (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,19 +100,48 @@ class DatabaseHelper {
       )
     ''');
 
-    // 3. Data staf awal
-    await db.rawInsert('''
-      INSERT INTO karyawan (nama_karyawan, pin, peran)
-      VALUES ('Ahmad Kasir', '1234', 'Kasir')
+    await db.execute('''
+      CREATE TABLE pelanggan (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kode_pelanggan TEXT UNIQUE NOT NULL,
+        nama_pelanggan TEXT NOT NULL,
+        nomor_wa TEXT NOT NULL,
+        alamat TEXT NOT NULL,
+        latitude REAL,
+        longitude REAL,
+        created_at TEXT NOT NULL
+      )
     ''');
-    await db.rawInsert('''
-      INSERT INTO karyawan (nama_karyawan, pin, peran)
-      VALUES ('Siti Supervisor', '8888', 'Manajer')
-    ''');
+
+    await _seedProdukAwal(db);
+
+    await db.rawInsert(
+      "INSERT INTO karyawan (nama_karyawan, pin, peran) VALUES ('Ahmad Kasir', '1234', 'Kasir')",
+    );
+    await db.rawInsert(
+      "INSERT INTO karyawan (nama_karyawan, pin, peran) VALUES ('Siti Supervisor', '8888', 'Manajer')",
+    );
+
+    await _seedPelangganAwal(db);
   }
 
-  // Migrasi: dipanggil otomatis jika database lama masih versi 1
   Future _onUpgradeDB(Database db, int oldVersion, int newVersion) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS produk (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kode_produk TEXT UNIQUE,
+        nama_produk TEXT NOT NULL,
+        kategori TEXT NOT NULL,
+        harga_beli REAL NOT NULL,
+        harga_jual REAL NOT NULL,
+        stok INTEGER NOT NULL,
+        gambar_path TEXT,
+        diskon_persen INTEGER DEFAULT 0,
+        created_at TEXT
+      )
+    ''');
+    await _seedProdukAwal(db);
+
     if (oldVersion < 2) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS karyawan (
@@ -96,36 +151,102 @@ class DatabaseHelper {
           peran TEXT NOT NULL
         )
       ''');
+      final countKaryawan =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM karyawan'),
+          ) ??
+          0;
+      if (countKaryawan == 0) {
+        await db.rawInsert(
+          "INSERT INTO karyawan (nama_karyawan, pin, peran) VALUES ('Ahmad Kasir', '1234', 'Kasir')",
+        );
+        await db.rawInsert(
+          "INSERT INTO karyawan (nama_karyawan, pin, peran) VALUES ('Siti Supervisor', '8888', 'Manajer')",
+        );
+      }
+    }
 
-      await db.rawInsert('''
-        INSERT INTO karyawan (nama_karyawan, pin, peran)
-        VALUES ('Ahmad Kasir', '1234', 'Kasir')
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS pelanggan (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kode_pelanggan TEXT UNIQUE NOT NULL,
+          nama_pelanggan TEXT NOT NULL,
+          nomor_wa TEXT NOT NULL,
+          alamat TEXT NOT NULL,
+          latitude REAL,
+          longitude REAL,
+          created_at TEXT NOT NULL
+        )
       ''');
-      await db.rawInsert('''
-        INSERT INTO karyawan (nama_karyawan, pin, peran)
-        VALUES ('Siti Supervisor', '8888', 'Manajer')
-      ''');
+      final countPelanggan =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM pelanggan'),
+          ) ??
+          0;
+      if (countPelanggan == 0) {
+        await _seedPelangganAwal(db);
+      }
     }
   }
 
-  // ==========================================
-  // CRUD KARYAWAN (M12)
-  // ==========================================
+  // ===== CRUD PELANGGAN (M13) =====
+  Future<int> insertPelanggan(Pelanggan pelanggan) async {
+    final db = await instance.database;
+    return await db.insert('pelanggan', pelanggan.toMap());
+  }
 
-  // CREATE
+  Future<List<Pelanggan>> getAllPelanggan() async {
+    final db = await instance.database;
+    final result = await db.query('pelanggan', orderBy: 'id DESC');
+    return result.map((json) => Pelanggan.fromMap(json)).toList();
+  }
+
+  Future<List<Pelanggan>> searchPelanggan(String keyword) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'pelanggan',
+      where:
+          'nama_pelanggan LIKE ? OR nomor_wa LIKE ? OR kode_pelanggan LIKE ?',
+      whereArgs: ['%$keyword%', '%$keyword%', '%$keyword%'],
+      orderBy: 'id DESC',
+    );
+    return result.map((json) => Pelanggan.fromMap(json)).toList();
+  }
+
+  Future<int> updatePelanggan(Pelanggan pelanggan) async {
+    final db = await instance.database;
+    return await db.update(
+      'pelanggan',
+      pelanggan.toMap(),
+      where: 'id = ?',
+      whereArgs: [pelanggan.id],
+    );
+  }
+
+  Future<int> deletePelanggan(int id) async {
+    final db = await instance.database;
+    return await db.delete('pelanggan', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> countPelanggan() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) as total FROM pelanggan');
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  // ===== CRUD KARYAWAN (M12) =====
   Future<int> insertKaryawan(Karyawan karyawan) async {
     final db = await instance.database;
     return await db.insert('karyawan', karyawan.toMap());
   }
 
-  // READ semua karyawan
   Future<List<Karyawan>> getAllKaryawan() async {
     final db = await instance.database;
     final result = await db.query('karyawan', orderBy: 'id ASC');
     return result.map((json) => Karyawan.fromMap(json)).toList();
   }
 
-  // UPDATE
   Future<int> updateKaryawan(Karyawan karyawan) async {
     final db = await instance.database;
     return await db.update(
@@ -136,39 +257,26 @@ class DatabaseHelper {
     );
   }
 
-  // DELETE
   Future<int> deleteKaryawan(int id) async {
     final db = await instance.database;
     return await db.delete('karyawan', where: 'id = ?', whereArgs: [id]);
   }
 
-  // ==========================================
-  // CRUD PRODUK (M11, tidak diubah)
-  // ==========================================
-
-  // CREATE
+  // ===== CRUD PRODUK (M11) =====
   Future<int> insertProduk(Produk produk) async {
     final db = await instance.database;
-    return await db.insert(
-      'produk',
-      produk.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    return await db.insert('produk', produk.toMap());
   }
 
-  // READ semua produk
   Future<List<Produk>> getAllProduk() async {
     final db = await instance.database;
-    final result = await db.query('produk', orderBy: 'harga_jual ASC');
+    final result = await db.query('produk', orderBy: 'id DESC');
     return result.map((json) => Produk.fromMap(json)).toList();
   }
 
-  // READ berdasarkan kategori
   Future<List<Produk>> getProdukByKategori(String kategori) async {
     final db = await instance.database;
-    if (kategori == 'Semua') {
-      return await getAllProduk();
-    }
+    if (kategori == 'Semua') return await getAllProduk();
     final result = await db.query(
       'produk',
       where: 'kategori = ?',
@@ -178,7 +286,6 @@ class DatabaseHelper {
     return result.map((json) => Produk.fromMap(json)).toList();
   }
 
-  // SEARCH pakai LIKE
   Future<List<Produk>> searchProduk(String keyword) async {
     final db = await instance.database;
     final result = await db.query(
@@ -190,7 +297,6 @@ class DatabaseHelper {
     return result.map((json) => Produk.fromMap(json)).toList();
   }
 
-  // UPDATE
   Future<int> updateProduk(Produk produk) async {
     final db = await instance.database;
     return await db.update(
@@ -201,9 +307,14 @@ class DatabaseHelper {
     );
   }
 
-  // DELETE
   Future<int> deleteProduk(int id) async {
     final db = await instance.database;
     return await db.delete('produk', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> countProduk() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) as total FROM produk');
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 }
